@@ -1,5 +1,6 @@
 # Product-Level Profitability & Revenue Optimization Analysis
 ## Tools: R (tidyverse), ggplot2, dplyr
+#### Live Report : https://mutkallam.github.io/Product-Profitability-Revenue-Optimization/
 
 In this project, I analyzed product-level revenue, cost, and profitability using a real-world e-commerce dataset to identify key drivers of profit, uncover inefficiencies, and evaluate strategic opportunities for improving overall business performance.
 
