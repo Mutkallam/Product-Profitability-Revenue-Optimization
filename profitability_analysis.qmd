@@ -1,0 +1,268 @@
+---
+title: "Product-Level Profitability & Revenue Optimization Analysis"
+subtitle: "Olist Brazilian E-Commerce Dataset"
+author: "Mutkallam Warraich"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    theme: cosmo
+    number-sections: true
+---
+
+# Executive Summary
+
+-   Total baseline profit was \$2.40M
+-   A 10% reduction in freight costs increased profit by \$217K (+9.06%)
+-   Profit is highly concentrated in a small number of categories (Pareto effect)
+-   Several transactions operate at negative margins, indicating inefficiencies in pricing or cost structure
+
+# Key Business Insights
+
+-   A small group of product categories drives the majority of profit
+-   Freight costs have a material impact on profitability
+-   Low-margin and negative-margin orders present an opportunity for optimization
+-   Pricing and cost control are the primary levers for improving profitability
+
+# Recommendations
+
+-   Optimize logistics to reduce freight costs (high ROI lever)
+-   Identify and adjust pricing for low-margin or loss-making products
+-   Focus inventory and marketing efforts on top-performing categories
+-   Implement margin monitoring at the SKU level
+
+# Code
+
+## Data Preparation
+
+This section loads and prepares the datasets used for analysis.
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(lubridate)
+
+# Load datasets
+order_items <- read_csv("data/raw/olist_order_items_dataset.csv") |> clean_names()
+orders      <- read_csv("data/raw/olist_orders_dataset.csv") |> clean_names()
+products    <- read_csv("data/raw/olist_products_dataset.csv") |> clean_names()
+customers   <- read_csv("data/raw/olist_customers_dataset.csv") |> clean_names()
+```
+
+```{r}
+names(order_items)
+names(orders)
+names(products)
+names(customers)
+```
+
+## Data Integration
+
+This step combines multiple datasets into a unified order-level dataset for analysis.
+
+```{r}
+master_orders <- order_items %>%
+  left_join(
+    orders %>%
+      select(
+        order_id,
+        customer_id,
+        order_status,
+        order_purchase_timestamp,
+        order_delivered_customer_date
+      ),
+    by = "order_id"
+  ) %>%
+  left_join(
+    products %>%
+      select(
+        product_id,
+        product_category_name
+      ),
+    by = "product_id"
+  ) %>%
+  left_join(
+    customers %>%
+      select(
+        customer_id,
+        customer_city,
+        customer_state
+      ),
+    by = "customer_id"
+  )
+```
+
+```{r}
+glimpse(master_orders)
+```
+
+## Data Cleaning
+
+This step filters the dataset to include only valid completed transactions.
+
+```{r}
+master_orders_clean <- master_orders %>%
+  filter(order_status == "delivered") %>%
+  filter(!is.na(price), !is.na(freight_value), !is.na(product_category_name))
+
+glimpse(master_orders_clean)
+```
+
+## Profitability Framework
+
+These will have all the key financial metrics including revenue, cost, profit, and margin being calculated.
+
+```{r}
+master_orders_clean <- master_orders_clean %>%
+  mutate(
+    revenue = price,
+    total_cost = 0.65 * price + freight_value,   # assumed 65% cost
+    gross_profit = revenue - total_cost,
+    margin_pct = gross_profit / revenue
+  )
+
+glimpse(master_orders_clean)
+```
+
+## Category-Level Performance
+
+This section summarizes revenue and profitability across product categories.
+
+```{r}
+category_kpis <- master_orders_clean %>%
+  group_by(product_category_name) %>%
+  summarise(
+    total_revenue = sum(revenue, na.rm = TRUE),
+    total_profit = sum(gross_profit, na.rm = TRUE),
+    avg_margin = mean(margin_pct, na.rm = TRUE),
+    total_orders = n()
+  ) %>%
+  arrange(desc(total_profit))
+
+category_kpis
+```
+
+### Top and Bottom Categories
+
+This section identifies the highest and lowest performing product categories.
+
+```{r}
+top_categories <- category_kpis %>%
+  slice_max(total_profit, n = 10)
+
+top_categories
+```
+
+```{r}
+bottom_categories <- category_kpis %>%
+  slice_min(total_profit, n = 10)
+
+bottom_categories
+```
+
+## Pareto Analysis
+
+This analysis examines how profit is concentrated across categories.
+
+```{r}
+pareto <- category_kpis %>%
+  mutate(
+    profit_share = total_profit / sum(total_profit),
+    cumulative_profit = cumsum(profit_share)
+  )
+
+pareto
+```
+
+### Pareto Visualization
+
+```{r}
+pareto_top <- pareto %>%
+  slice_max(total_profit, n = 15)
+
+ggplot(pareto_top, aes(x = reorder(product_category_name, total_profit), y = cumulative_profit)) +
+  geom_line(group = 1) +
+  geom_point() +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Pareto (Top 15 Categories)",
+    x = "Category",
+    y = "Cumulative Profit %"
+  )
+```
+
+## Price vs Profit Analysis
+
+This section explores the relationship between pricing and profitability.
+
+```{r}
+ggplot(master_orders_clean, aes(x = price, y = gross_profit)) +
+  geom_point(alpha = 0.3) +
+  labs(
+    title = "Profit vs Price (with Freight)",
+    x = "Price",
+    y = "Gross Profit"
+  )
+```
+
+## Margin Distribution
+
+This section shows how profit margins are distributed across transactions.
+
+```{r}
+ggplot(master_orders_clean, aes(x = margin_pct)) +
+  geom_histogram(bins = 50) +
+  labs(
+    title = "Margin Distribution",
+    x = "Margin %",
+    y = "Count"
+  )
+```
+
+## Loss Analysis
+
+This section identifies transactions generating negative profit.
+
+```{r}
+loss_products <- master_orders_clean %>%
+  filter(gross_profit < 0)
+
+nrow(loss_products)
+```
+
+## Scenario Analysis
+
+This section simulates the impact of reducing freight costs on profitability.
+
+```{r}
+scenario <- master_orders_clean %>%
+  mutate(
+    new_cost = 0.65 * price + (freight_value * 0.9),
+    new_profit = price - new_cost
+  )
+
+# Compare total profit
+baseline_profit <- sum(master_orders_clean$gross_profit)
+new_profit <- sum(scenario$new_profit)
+
+profit_lift <- new_profit - baseline_profit
+profit_lift
+```
+
+```{r}
+profit_lift_pct <- profit_lift / baseline_profit
+
+profit_lift_pct
+```
+
+## Financial Impact Summary
+
+```{r}
+tibble(
+  baseline_profit = baseline_profit,
+  new_profit = new_profit,
+  profit_lift = profit_lift,
+  profit_lift_pct = profit_lift_pct
+)
+```
